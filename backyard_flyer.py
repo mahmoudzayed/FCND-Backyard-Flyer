@@ -23,7 +23,7 @@ class BackyardFlyer(Drone):
     def __init__(self, connection):
         super().__init__(connection)
         self.target_position = np.array([0.0, 0.0, 0.0])
-        self.all_waypoints = [np.array([2.0, 0.0, 3.0]), np.array([2.0, 2.0, 3.0]), np.array([0.0, 2.0, 3.0]),np.array([0.0, 0.0, 3.0])]
+        self.all_waypoints = []
         self.in_mission = True
         self.check_state = {}
 
@@ -41,23 +41,39 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.LOCAL_POSITION` is received and self.local_position contains new data
         """
-        self.target_position[0] = self.all_waypoints[0][0]
-        self.target_position[1] = self.all_waypoints[0][1]
-        self.target_position[2] = self.all_waypoints[0][2]
-        self.cmd_position(self.target_position[0], self.target_position[1], self.target_position[2], 0.0)    
+        if self.flight_state == States.TAKEOFF:
+            # coordinate conversion 
+            altitude = -1.0 * self.local_position[2]
+
+            # check if altitude is within 95% of target
+            if altitude > 0.95 * self.target_position[2]:
+                self.calculate_box()
+                self.waypoint_transition()
+                
+        if self.flight_state == States.WAYPOINT:	
+            # coordinate conversion 
+            north = 1.0 * self.local_position[0]
+            east = 1.0 * self.local_position[1]
+            print("local_position_callback (%s,%s)"%(abs(east - self.target_position[1]),abs(north - self.target_position[0])))
+
+            # check if current location is within 95% of target location
+            if (abs(north - self.target_position[0]) < 0.1) and (abs(east - self.target_position[1]) < 0.1):
+                if len(self.all_waypoints) == 0:
+                    self.landing_transition()
+                else:
+                    self.waypoint_transition()
             
     def velocity_callback(self):
         """
         This triggers when `MsgID.LOCAL_VELOCITY` is received and self.local_velocity contains new data
         """
-        if self.flight_phase == Phases.LANDING:
-            if ((self.global_position[2] - self.global_home[2] < 0.1) and abs(self.local_position[2]) < 0.01
-		        self.disarming_transition()
+        print("velocity_callback")
+        if self.flight_state == States.LANDING:
+            if ((self.global_position[2] - self.global_home[2] < 0.1) and abs(self.local_position[2]) < 0.01):
+                self.disarming_transition()
 
     def state_callback(self):
         """
-        TODO: Implement this method
-
         This triggers when `MsgID.STATE` is received and self.armed and self.guided contain new data
         """
         if not self.in_mission:
@@ -66,10 +82,7 @@ class BackyardFlyer(Drone):
             self.arming_transition()
         elif self.flight_state == States.ARMING:
             if self.armed:
-                self.takeoff_transition()
-        elif self.flight_state == States.TAKEOFF:
-            if self.armed:
-                self.waypoint_transition()
+                self.takeoff_transition()                        
         elif self.flight_state == States.DISARMING:
             if not self.armed:
                 self.manual_transition()
@@ -79,7 +92,9 @@ class BackyardFlyer(Drone):
         
         1. Return waypoints to fly a box
         """
-        self.all_waypoints = [np.array([2.0, 0.0, 3.0]), np.array([2.0, 2.0, 3.0]), np.array([0.0, 2.0, 3.0]),np.array([0.0, 0.0, 3.0])]
+        height = 3.0 
+        side = 5.0
+        self.all_waypoints = [np.array([side, 0.0, height]), np.array([side, side, height]), np.array([0.0, side, height]),np.array([0.0, 0.0, height])]
 
     def arming_transition(self):
         """TODO: Fill out this method
@@ -120,7 +135,11 @@ class BackyardFlyer(Drone):
         2. Transition to WAYPOINT state
         """
         print("waypoint transition")
-        self.flight_state = States.WAYPOINT
+        print("waypoint points %s" % len(self.all_waypoints))
+        if len(self.all_waypoints) > 0:
+            self.target_position = self.all_waypoints.pop(0)
+            self.cmd_position(self.target_position[0], self.target_position[1], self.target_position[2], 0.0)    
+            self.flight_state = States.WAYPOINT
 
     def landing_transition(self):
         """TODO: Fill out this method
